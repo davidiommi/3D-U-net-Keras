@@ -104,7 +104,7 @@ Use the following Bibtex if you need to cite this repository:
 @misc{davidiommi1991_unet_Keras,
   author = {David Iommi},
   title = {3D-Unet: patched based Keras implementation for medical images segmentation},
-  howpublished = {\url{https://github.com/jackyko1991/vnet-tensorflow}},
+  howpublished = {\url{https://github.com/davidiommi/3D-U-net-Keras}},
   year = {2020},
   publisher={Github},
   journal={GitHub repository},
