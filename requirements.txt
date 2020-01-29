@@ -1,0 +1,10 @@
+pillow
+scikit-learn
+simpleITK
+keras
+scikit-image
+pandas
+pydicom
+nibabel
+tqdm
+git+https://www.github.com/farizrahman4u/keras-contrib.git
