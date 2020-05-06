@@ -15,16 +15,16 @@ from skimage.morphology import binary_closing
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--Use_GPU', action='store_true', default=True, help='Use the GPU')
-parser.add_argument('--Select_GPU', type=int, default=2, help='Select the GPU')
-parser.add_argument("--input", type=str, default='./Data_folder/volumes/HC004 test_TOF_img.nii', help='path to the .nii image')
-parser.add_argument("--output", type=str, default='./result_single_image.nii', help='path to the .nii segmented result to save')
+parser.add_argument('--Select_GPU', type=int, default=0, help='Select the GPU')
+parser.add_argument("--image", type=str, default='./Data_folder/volumes/HC004 test_TOF_img.nii', help='path to the .nii image')
+parser.add_argument("--result", type=str, default='./result_single_image.nii', help='path to the .nii segmented result to save')
 parser.add_argument("--weights", type=str, default='./History/weights/unet3d.h5', help='weights to load')
 
 parser.add_argument("--resample", action='store_true', default=False, help='Decide or not to resample the image to a new resolution')
-parser.add_argument("--new_resolution", type=float, default=(1.5, 1.5, 1.5), help='New resolution')
+parser.add_argument("--new_resolution", type=float, default=(1, 1, 2), help='New resolution')
 parser.add_argument("--input_channels", type=float, nargs=1, default=1, help="Input channels")
 parser.add_argument("--output_channels", type=float, nargs=1, default=1, help="Output channels (Current implementation supports one output channel")
-parser.add_argument("--patch_size", type=int, nargs=3, default=[128, 128, 128], help="Input dimension for the generator")
+parser.add_argument("--patch_size", type=int, nargs=3, default=[64, 64, 64], help="Input dimension for the generator")
 parser.add_argument("--batch_size", type=int, nargs=1, default=1, help="Batch size to feed the network (currently supports 1)")
 
 parser.add_argument("--stride_inplane", type=int, nargs=1, default=64, help="Stride size in 2D plane")
@@ -33,6 +33,16 @@ args = parser.parse_args()
 
 if args.Use_GPU is True:
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.Select_GPU)
+
+
+def from_numpy_to_itk(image_np,image_itk):
+    image_np = np.transpose(image_np, (2, 1, 0))
+    image = sitk.GetImageFromArray(image_np)
+    image.SetOrigin(image_itk.GetOrigin())
+    image.SetDirection(image_itk.GetDirection())
+    image.SetSpacing(image_itk.GetSpacing())
+    return image
+
 
 def prepare_batch(image, ijk_patch_indices):
     image_batches = []
@@ -49,11 +59,15 @@ def prepare_batch(image, ijk_patch_indices):
     return image_batches
 
 
-def segment_image(model, image_path, result_path, resample, resolution, patch_size_x, patch_size_y, patch_size_z, stride_inplane, stride_layer, batch_size=1):
+# inference single image
+def inference(write_image, model, image_path, label_path, result_path, resample, resolution, patch_size_x, patch_size_y, patch_size_z, stride_inplane, stride_layer, batch_size=1, segmentation=True):
 
     # create transformations to image and labels
-    transforms = [
-        NiftiDataset.Resample(resolution, resample),
+    transforms1 = [
+        NiftiDataset.Resample(resolution, resample)
+    ]
+
+    transforms2 = [
         NiftiDataset.Padding((patch_size_x, patch_size_y, patch_size_z))
     ]
 
@@ -70,28 +84,57 @@ def segment_image(model, image_path, result_path, resample, resolution, patch_si
     image = normalizeFilter.Execute(image)  # set mean and std deviation
     image = resacleFilter.Execute(image)
 
+    castImageFilter = sitk.CastImageFilter()
+    castImageFilter.SetOutputPixelType(sitk.sitkFloat32)
+    image = castImageFilter.Execute(image)
+
     # create empty label in pair with transformed image
-    label_tfm = sitk.Image(image.GetSize(), sitk.sitkUInt8)
+    label_tfm = sitk.Image(image.GetSize(), sitk.sitkFloat32)
     label_tfm.SetOrigin(image.GetOrigin())
     label_tfm.SetDirection(image.GetDirection())
     label_tfm.SetSpacing(image.GetSpacing())
 
     sample = {'image': image, 'label': label_tfm}
 
-    for transform in transforms:
+    for transform in transforms1:
+        sample = transform(sample)
+
+    # keeping track on how much padding will be performed before the inference
+    image_array = sitk.GetArrayFromImage(sample['image'])
+    pad_x = patch_size_x - (patch_size_x - image_array.shape[2])
+    pad_y = patch_size_x - (patch_size_y - image_array.shape[1])
+    pad_z = patch_size_z - (patch_size_z - image_array.shape[0])
+
+    image_pre_pad = sample['image']
+
+    for transform in transforms2:
         sample = transform(sample)
 
     image_tfm, label_tfm = sample['image'], sample['label']
 
     # convert image to numpy array
-    image_np = sitk.GetArrayFromImage(image_tfm).astype(np.uint8)
-    label_np = sitk.GetArrayFromImage(label_tfm).astype(np.uint8)
+    image_np = sitk.GetArrayFromImage(image_tfm)
+    label_np = sitk.GetArrayFromImage(label_tfm)
 
     label_np = np.asarray(label_np, np.float32)
 
     # unify numpy and sitk orientation
     image_np = np.transpose(image_np, (2, 1, 0))
     label_np = np.transpose(label_np, (2, 1, 0))
+
+    if segmentation is True:
+        label_np = np.around(label_np)
+
+        # ----------------- Padding the image if the z dimension still is not even ----------------------
+
+    if (image_np.shape[2] % 2) == 0:
+        Padding = False
+    else:
+        image_np = np.pad(image_np, ((0, 0), (0, 0), (0, 1)), 'edge')
+        label_np = np.pad(label_np, ((0, 0), (0, 0), (0, 1)), 'edge')
+        Padding = True
+
+    # ------------------------------------------------------------------------------------------------
 
     # a weighting matrix will be used for averaging the overlapped region
     weight_np = np.zeros(label_np.shape)
@@ -152,14 +195,22 @@ def segment_image(model, image_path, result_path, resample, resolution, patch_si
 
     print("{}: Evaluation complete".format(datetime.datetime.now()))
     # eliminate overlapping region using the weighted value
-    label_np = np.rint(np.float32(label_np) / np.float32(weight_np) + 0.01)
+    label_np = (np.float32(label_np) / np.float32(weight_np) + 0.01)
+
+    if segmentation is True:
+        label_np = np.around(label_np)
+
+        # removed the 1 pad on z
+    if Padding is True:
+        label_np = label_np[:, :, 0:(label_np.shape[2] - 1)]
+
+    # removed all the padding
+    label_np = label_np[:pad_x, :pad_y, :pad_z]
 
     # convert back to sitk space
-    label = np.transpose(label_np, (2, 1, 0))
-    label = sitk.GetImageFromArray(label)
-    label.SetOrigin(image.GetOrigin())
-    label.SetDirection(image.GetDirection())
-    label.SetSpacing(image.GetSpacing())
+    label = from_numpy_to_itk(label_np, image_pre_pad)
+
+    # ---------------------------------------------------------------------------------------------
 
     # save segmented label
     writer = sitk.ImageFileWriter()
@@ -167,29 +218,69 @@ def segment_image(model, image_path, result_path, resample, resolution, patch_si
     if resample is True:
 
         print("{}: Resampling label back to original image space...".format(datetime.datetime.now()))
-        label = resample_sitk_image(label, spacing=image.GetSpacing(), interpolator='linear')
-        label = resize(label, (sitk.GetArrayFromImage(image)).shape[::-1], sitk.sitkNearestNeighbor)
-        label.SetDirection(image.GetDirection())
-        label.SetOrigin(image.GetOrigin())
-        label.SetSpacing(image.GetSpacing())
+        # label = resample_sitk_image(label, spacing=image.GetSpacing(), interpolator='bspline')   # keep this commented
+        if segmentation is True:
+            label = resize(label, (sitk.GetArrayFromImage(image)).shape[::-1], sitk.sitkBSpline)
+            label_array = np.around(sitk.GetArrayFromImage(label))
+            label = sitk.GetImageFromArray(label_array)
+            label.SetDirection(image.GetDirection())
+            label.SetOrigin(image.GetOrigin())
+            label.SetSpacing(image.GetSpacing())
+        else:
+            label = resize(label, (sitk.GetArrayFromImage(image)).shape[::-1], sitk.sitkBSpline)
+            label.SetDirection(image.GetDirection())
+            label.SetOrigin(image.GetOrigin())
+            label.SetSpacing(image.GetSpacing())
 
     else:
+
         label = label
 
+
+    if label_path is not None and segmentation is True:
+
+        reader = sitk.ImageFileReader()
+        reader.SetFileName(label_path)
+        true_label = reader.Execute()
+
+        true_label = sitk.GetArrayFromImage(true_label)
+        predicted = sitk.GetArrayFromImage(label)
+
+        np_dice = numpy_dice(true_label, predicted, axis=None)
+        ravd = rel_abs_vol_diff(true_label, predicted)
+        hauss_dist = (surface_dist(true_label, predicted)).max()
+        mean_surf_dist = (surface_dist(true_label, predicted)).mean()
+
     writer.SetFileName(result_path)
-    writer.Execute(label)
-    print("{}: Save evaluate label at {} success".format(datetime.datetime.now(), result_path))
+
+    if write_image is True:
+        writer.Execute(label)
+        print("{}: Save evaluate label at {} success".format(datetime.datetime.now(), result_path))
+
+    if label_path is not None and segmentation is True:
+        print("Dice score:", np_dice)
+
+        return label, np_dice, ravd, hauss_dist, mean_surf_dist
+
+    else:
+        np_dice = None
+        ravd = None
+        hauss_dist = None
+        mean_surf_dist = None
+
+        return label, np_dice, ravd, hauss_dist, mean_surf_dist
 
 
-input_dim = [args.batch_size,  args.patch_size[0],  args.patch_size[1], args.patch_size[2], args.input_channels]
-model = unet_model_3d(input_shape=input_dim, n_labels=args.output_channels)
-model.load_weights(args.weights)
+if __name__ == "__main__":
 
-segment_image(model, args.input, args.output, args.resample, args.new_resolution, args.patch_size[0],args.patch_size[1],args.patch_size[2],
-              args.stride_inplane, args.stride_layer)
+    input_dim = [args.batch_size,  args.patch_size[0],  args.patch_size[1], args.patch_size[2], args.input_channels]
+    model = unet_model_3d(input_shape=input_dim, n_labels=args.output_channels)
+    model.load_weights(args.weights)
 
-
-
+    result, np_dice, ravd, hauss_dist, mean_surf_dist = inference(write_image=True, model=model, image_path=args.image,label_path=None,
+                                                                  result_path=args.result, resample=args.resample, resolution=args.new_resolution,
+                                                                  patch_size_x=args.patch_size[0], patch_size_y=args.patch_size[1],patch_size_z=args.patch_size[2],
+                                                                  stride_inplane=args.stride_inplane, stride_layer=args.stride_layer)
 
 
 

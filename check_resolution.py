@@ -21,7 +21,7 @@ for i in range(len(images)):
 
     a = sitk.ReadImage(images[i])
     if args.resample is True:
-        a = resample_sitk_image(a, spacing=args.new_resolution, interpolator='linear')
+        a = resample_sitk_image(a, spacing=args.new_resolution, interpolator='bspline')
     spacing1 = a.GetSpacing()
     a = sitk.GetArrayFromImage(a)
     a = np.transpose(a, axes=(2, 1, 0))  # reshape array from itk z,y,x  to  x,y,z
@@ -29,7 +29,7 @@ for i in range(len(images)):
 
     b = sitk.ReadImage(labels[i])
     if args.resample is True:
-        b = resample_sitk_image(b, spacing=args.new_resolution, interpolator='nearest')
+        b = resample_sitk_image(b, spacing=args.new_resolution, interpolator='bspline')
     spacing2 = b.GetSpacing()
     b = sitk.GetArrayFromImage(b)
     b = np.transpose(b, axes=(2, 1, 0))  # reshape array from itk z,y,x  to  x,y,z

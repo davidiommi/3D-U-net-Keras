@@ -12,6 +12,16 @@ from sklearn.model_selection import train_test_split
 import scipy
 
 
+# ------- Swithes -------
+
+interpolator_image = sitk.sitkBSpline                  # interpolator image
+interpolator_label = sitk.sitkBSpline                  # interpolator label
+
+_interpolator_image = 'bspline'          # interpolator image
+_interpolator_label = 'bspline'          # interpolator label
+
+Segmentation = True
+
 # ------------------------------------- Functions ---------------------------------------
 def write_list(name, my_list):
     with open(name, 'w') as f:
@@ -49,6 +59,10 @@ def lstFiles(Path):
     for dirName, subdirList, fileList in os.walk(Path):
         for filename in fileList:
             if ".nii.gz" in filename.lower():
+                images_list.append(os.path.join(dirName, filename))
+            elif ".nii" in filename.lower():
+                images_list.append(os.path.join(dirName, filename))
+            elif ".nrrd" in filename.lower():
                 images_list.append(os.path.join(dirName, filename))
 
     images_list = sorted(images_list, key=numericalSort)
@@ -206,7 +220,7 @@ def matrix_from_axis_angle(a):
 
 def resample_image(image, transform):
     reference_image = image
-    interpolator = sitk.sitkLinear
+    interpolator = interpolator_image
     default_value = 0
     return sitk.Resample(image, reference_image, transform,
                          interpolator, default_value)
@@ -214,10 +228,9 @@ def resample_image(image, transform):
 
 def resample_label(image, transform):
     reference_image = image
-    interpolator = sitk.sitkNearestNeighbor
+    interpolator = interpolator_label
     default_value = 0
-    return sitk.Resample(image, reference_image, transform,
-                         interpolator, default_value)
+    return sitk.Resample(image, reference_image, transform, interpolator, default_value)
 
 
 def get_center(img):
@@ -227,7 +240,7 @@ def get_center(img):
                                               int(np.ceil(depth / 2))))
 
 
-def rotation3d_image(image, theta_z):
+def rotation3d_image(image, theta_x, theta_y, theta_z):
     """
     This function rotates an image across each of the x, y, z axes by theta_x, theta_y, and theta_z degrees
     respectively
@@ -238,43 +251,37 @@ def rotation3d_image(image, theta_z):
     :param show: Boolean, whether or not the user wants to see the result of the rotation
     :return: The rotated image
     """
+    theta_x = np.deg2rad(theta_x)
+    theta_y = np.deg2rad(theta_y)
     theta_z = np.deg2rad(theta_z)
-    euler_transform = sitk.Euler3DTransform()
-    # print(euler_transform.GetMatrix())
+    euler_transform = sitk.Euler3DTransform(get_center(image), theta_x, theta_y, theta_z, (0, 0, 0))
     image_center = get_center(image)
     euler_transform.SetCenter(image_center)
-
-    direction = image.GetDirection()
-    axis_angle = (direction[2], direction[5], direction[8], theta_z)
-    np_rot_mat = matrix_from_axis_angle(axis_angle)
-    euler_transform.SetMatrix(np_rot_mat.flatten().tolist())
+    euler_transform.SetRotation(theta_x, theta_y, theta_z)
     resampled_image = resample_image(image, euler_transform)
     return resampled_image
 
 
-def rotation3d_label(image, theta_z):
-    """
-    This function rotates an image across each of the x, y, z axes by theta_x, theta_y, and theta_z degrees
-    respectively
-    :param image: An sitk MRI image
-    :param theta_x: The amount of degrees the user wants the image rotated around the x axis
-    :param theta_y: The amount of degrees the user wants the image rotated around the y axis
-    :param theta_z: The amount of degrees the user wants the image rotated around the z axis
-    :param show: Boolean, whether or not the user wants to see the result of the rotation
-    :return: The rotated image
-    """
-    theta_z = np.deg2rad(theta_z)
-    euler_transform = sitk.Euler3DTransform()
-    # print(euler_transform.GetMatrix())
-    image_center = get_center(image)
-    euler_transform.SetCenter(image_center)
-
-    direction = image.GetDirection()
-    axis_angle = (direction[2], direction[5], direction[8], theta_z)
-    np_rot_mat = matrix_from_axis_angle(axis_angle)
-    euler_transform.SetMatrix(np_rot_mat.flatten().tolist())
-    resampled_image = resample_label(image, euler_transform)
-    return resampled_image
+def rotation3d_label(image, theta_x, theta_y, theta_z):
+   """
+   This function rotates an image across each of the x, y, z axes by theta_x, theta_y, and theta_z degrees
+   respectively
+   :param image: An sitk MRI image
+   :param theta_x: The amount of degrees the user wants the image rotated around the x axis
+   :param theta_y: The amount of degrees the user wants the image rotated around the y axis
+   :param theta_z: The amount of degrees the user wants the image rotated around the z axis
+   :param show: Boolean, whether or not the user wants to see the result of the rotation
+   :return: The rotated image
+   """
+   theta_x = np.deg2rad(theta_x)
+   theta_y = np.deg2rad(theta_y)
+   theta_z = np.deg2rad(theta_z)
+   euler_transform = sitk.Euler3DTransform(get_center(image), theta_x, theta_y, theta_z, (0, 0, 0))
+   image_center = get_center(image)
+   euler_transform.SetCenter(image_center)
+   euler_transform.SetRotation(theta_x, theta_y, theta_z)
+   resampled_image = resample_label(image, euler_transform)
+   return resampled_image
 
 
 def flipit(image, axes):
@@ -303,13 +310,14 @@ def brightness(image):
     origin = image.GetOrigin()
 
     max = 255
+    min = 0
 
     c = np.random.randint(-20, 20)
 
     array = array + c
 
     array[array >= max] = max
-    array[array <= 0] = 0
+    array[array <= 0] = min
 
     img = sitk.GetImageFromArray(np.transpose(array, axes=(2, 1, 0)))
     img.SetDirection(direction)
@@ -330,22 +338,19 @@ def contrast(image):
     IOD = np.sum(array)
     luminanza = int(IOD / ntotpixel)
 
-    max = 255
-    c = np.random.randint(-10, 10)
+    c = np.random.randint(-5, 5)
 
     d = array - luminanza
     dc = d * abs(c) / 100
 
     if c >= 0:
         J = array + dc
-        J[J >= max] = max
+        J[J >= 255] = 255
         J[J <= 0] = 0
     else:
         J = array - dc
-        J[J >= max] = max
+        J[J >= 255] = 255
         J[J <= 0] = 0
-
-    J = J.astype(int)
 
     img = sitk.GetImageFromArray(np.transpose(J, axes=(2, 1, 0)))
     img.SetDirection(direction)
@@ -389,8 +394,6 @@ def adapt_eq_histogram(image):
 
     return image
 
-
-
 # --------------------------------------------------------------------------------------
 
 class NiftiDataset(object):
@@ -417,7 +420,7 @@ class NiftiDataset(object):
         self.transforms = transforms
         self.train = train
         self.test = test
-        self.bit = sitk.sitkUInt8
+        self.bit = sitk.sitkFloat32
 
     def get_dataset(self):
 
@@ -448,16 +451,22 @@ class NiftiDataset(object):
 
         if self.train:
             label = self.read_image(label_path)
+            if Segmentation is False:
+                label = Normalization(label)  # set intensity 0-255
             castImageFilter.SetOutputPixelType(self.bit)
             label = castImageFilter.Execute(label)
 
         elif self.test:
             label = self.read_image(label_path)
+            if Segmentation is False:
+                label = Normalization(label)  # set intensity 0-255
             castImageFilter.SetOutputPixelType(self.bit)
             label = castImageFilter.Execute(label)
 
         else:
             label = sitk.Image(image.GetSize(), self.bit)  # if it´s not train, create a new image with same size and spacing
+            if Segmentation is False:
+                label = Normalization(label)  # set intensity 0-255
             label.SetOrigin(image.GetOrigin())
             label.SetSpacing(image.GetSpacing())
 
@@ -467,8 +476,11 @@ class NiftiDataset(object):
             for transform in self.transforms:
                 sample = transform(sample)
 
-        image_np = sitk.GetArrayFromImage(sample['image']).astype(np.uint8)
-        label_np = sitk.GetArrayFromImage(sample['label']).astype(np.uint8)
+        image_np = sitk.GetArrayFromImage(sample['image'])
+        label_np = sitk.GetArrayFromImage(sample['label'])
+
+        if Segmentation is True:
+            label_np = np.around(label_np)
 
         # to unify matrix dimension order between SimpleITK([x,y,z]) and numpy([z,y,x])  (actually it´s the contrary)
         image_np = np.transpose(image_np, (2, 1, 0))
@@ -613,8 +625,8 @@ class Resample(object):
         check = self.check
 
         if check is True:
-            image = resample_sitk_image(image, spacing=new_resolution, interpolator='linear')
-            label = resample_sitk_image(label, spacing=new_resolution, interpolator='nearest')
+            image = resample_sitk_image(image, spacing=new_resolution, interpolator=_interpolator_image)
+            label = resample_sitk_image(label, spacing=new_resolution, interpolator=_interpolator_label)
 
             return {'image': image, 'label': label}
 
@@ -625,7 +637,6 @@ class Resample(object):
 class Padding(object):
     """
     Add padding to the image if size is smaller than patch size
-
       Args:
           output_size (tuple or int): Desired output size. If int, a cubic volume is formed
       """
@@ -666,15 +677,16 @@ class Padding(object):
             resampler.SetSize(output_size)
 
             # resample on image
-            resampler.SetInterpolator(2)
+            resampler.SetInterpolator(sitk.sitkBSpline)
             resampler.SetOutputOrigin(image.GetOrigin())
             resampler.SetOutputDirection(image.GetDirection())
             image = resampler.Execute(image)
 
             # resample on label
-            resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+            resampler.SetInterpolator(sitk.sitkBSpline)
             resampler.SetOutputOrigin(label.GetOrigin())
             resampler.SetOutputDirection(label.GetDirection())
+
             label = resampler.Execute(label)
 
             return {'image': image, 'label': label}
@@ -685,7 +697,6 @@ class RandomCrop(object):
     Crop randomly the image in a sample. This is usually used for data augmentation.
       Drop ratio is implemented for randomly dropout crops with empty label. (Default to be 0.2)
       This transformation only applicable in train mode
-
     Args:
       output_size (tuple or int): Desired output size. If int, cubic crop is made.
     """
@@ -722,7 +733,7 @@ class RandomCrop(object):
         roiFilter = sitk.RegionOfInterestImageFilter()
         roiFilter.SetSize([size_new[0], size_new[1], size_new[2]])
 
-        # statFilter = sitk.StatisticsImageFilter()
+        # statFilter = sitk.StatisticsImageFilter()     # not useful
         # statFilter.Execute(label)
         # print(statFilter.GetMaximum(), statFilter.GetSum())
 
@@ -745,9 +756,21 @@ class RandomCrop(object):
 
             roiFilter.SetIndex([start_i, start_j, start_k])
 
-            label_crop = roiFilter.Execute(label)
-            statFilter = sitk.StatisticsImageFilter()
-            statFilter.Execute(label_crop)
+            if Segmentation is False:
+                # threshold label into only ones and zero
+                threshold = sitk.BinaryThresholdImageFilter()
+                threshold.SetLowerThreshold(1)
+                threshold.SetUpperThreshold(255)
+                threshold.SetInsideValue(1)
+                threshold.SetOutsideValue(0)
+                mask = threshold.Execute(label)
+                mask_cropped = roiFilter.Execute(mask)
+                statFilter.Execute(mask_cropped)  # mine for GANs
+
+            if Segmentation is True:
+                label_crop = roiFilter.Execute(label)
+                statFilter = sitk.StatisticsImageFilter()
+                statFilter.Execute(label_crop)
 
             # will iterate until a sub volume containing label is extracted
             # pixel_count = seg_crop.GetHeight()*seg_crop.GetWidth()*seg_crop.GetDepth()
@@ -768,6 +791,7 @@ class RandomCrop(object):
 class Augmentation(object):
     """
     Application of transforms. This is usually used for data augmentation.
+    List of transforms: random noise
     """
 
     def __init__(self):
@@ -775,7 +799,7 @@ class Augmentation(object):
 
     def __call__(self, sample):
 
-        choice = np.random.choice([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+        choice = np.random.choice([0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11])
 
         # no augmentation
         if choice == 0:  # no augmentation
@@ -794,6 +818,8 @@ class Augmentation(object):
 
             image, label = sample['image'], sample['label']
             image = self.noiseFilter.Execute(image)
+            if Segmentation is False:
+                label = self.noiseFilter.Execute(label)
 
             return {'image': image, 'label': label}
 
@@ -807,17 +833,21 @@ class Augmentation(object):
 
             image, label = sample['image'], sample['label']
             image = self.noiseFilter.Execute(image)
+            if Segmentation is False:
+                label = self.noiseFilter.Execute(label)    # comment for segmentation
 
             return {'image': image, 'label': label}
 
-        # Random rotation
+        # Random rotation x y z
         if choice == 3:  # Random rotation
 
-            theta = np.random.randint(-180, 180)
+            theta_x = np.random.randint(-20, 20)
+            theta_y = np.random.randint(-20, 20)
+            theta_z = np.random.randint(-180, 180)
             image, label = sample['image'], sample['label']
 
-            image = rotation3d_image(image, theta)
-            label = rotation3d_label(label, theta)
+            image = rotation3d_image(image,theta_x,theta_y, theta_z)
+            label = rotation3d_label(label,theta_x,theta_y, theta_z)
 
             return {'image': image, 'label': label}
 
@@ -869,6 +899,8 @@ class Augmentation(object):
             image, label = sample['image'], sample['label']
 
             image = brightness(image)
+            if Segmentation is False:
+                label = brightness(label)
 
             return {'image': image, 'label': label}
 
@@ -878,6 +910,8 @@ class Augmentation(object):
             image, label = sample['image'], sample['label']
 
             image = contrast(image)
+            if Segmentation is False:
+                label = contrast(label)             # comment for segmentation
 
             return {'image': image, 'label': label}
 
@@ -895,14 +929,53 @@ class Augmentation(object):
 
             return {'image': image, 'label': label}
 
-        # histogram adaptequ
-        if choice == 9:
+        # Random rotation z
+        if choice == 9:  # Random rotation
 
+            theta_x = 0
+            theta_y = 0
+            theta_z = np.random.randint(-180, 180)
             image, label = sample['image'], sample['label']
 
-            image = adapt_eq_histogram(image)
+            image = rotation3d_image(image, theta_x, theta_y, theta_z)
+            label = rotation3d_label(label, theta_x, theta_y, theta_z)
 
             return {'image': image, 'label': label}
+
+        # Random rotation x
+        if choice == 10:  # Random rotation
+
+            theta_x = np.random.randint(-20, 20)
+            theta_y = 0
+            theta_z = 0
+            image, label = sample['image'], sample['label']
+
+            image = rotation3d_image(image, theta_x, theta_y, theta_z)
+            label = rotation3d_label(label, theta_x, theta_y, theta_z)
+
+            return {'image': image, 'label': label}
+
+        # Random rotation y
+        if choice == 11:  # Random rotation
+
+            theta_x = 0
+            theta_y = np.random.randint(-20, 20)
+            theta_z = 0
+            image, label = sample['image'], sample['label']
+
+            image = rotation3d_image(image, theta_x, theta_y, theta_z)
+            label = rotation3d_label(label, theta_x, theta_y, theta_z)
+
+            return {'image': image, 'label': label}
+
+        # # histogram adaptequ
+        # if choice == 9:
+        #
+        #     image, label = sample['image'], sample['label']
+        #
+        #     image = adapt_eq_histogram(image)
+        #
+        #     return {'image': image, 'label': label}
 
 
 class ConfidenceCrop(object):
@@ -915,7 +988,6 @@ class ConfidenceCrop(object):
     offset_i = random.choice(s_i)
     where i represents axis direction
     A higher sigma value will provide a higher offset
-
     Args:
       output_size (tuple or int): Desired output size. If int, cubic crop is made.
       sigma (float): Normalized standard deviation value.
@@ -944,7 +1016,7 @@ class ConfidenceCrop(object):
 
         # guarantee label type to be integer
         castFilter = sitk.CastImageFilter()
-        castFilter.SetOutputPixelType(sitk.sitkInt8)
+        castFilter.SetOutputPixelType(sitk.sitkUInt8)
         label = castFilter.Execute(label)
 
         ccFilter = sitk.ConnectedComponentImageFilter()
@@ -1000,7 +1072,6 @@ class BSplineDeformation(object):
     Details can be found here:
     https://simpleitk.github.io/SPIE2018_COURSE/spatial_transformations.pdf
     https://itk.org/Doxygen/html/classitk_1_1BSplineTransform.html
-
     Args:
       randomness (int,float): BSpline deformation scaling factor, default is 4.
     """

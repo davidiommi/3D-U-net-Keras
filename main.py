@@ -16,7 +16,7 @@ start = time()
 # -----------------
 parser = argparse.ArgumentParser()
 parser.add_argument("--Use_GPU", action='store_true', default=True, help='Use the GPU')
-parser.add_argument("--Select_GPU", type=int, default=2, help='Select the GPU')
+parser.add_argument("--Select_GPU", type=int, default=0, help='Select the GPU')
 parser.add_argument("--Create_training_val_test_dataset", action='store_true', default=False, help='Divide the data for the training')
 parser.add_argument("--Do_you_wanna_train", action='store_true', default=False, help='Training will start')
 parser.add_argument("--Do_you_wanna_load_weights", action='store_true', default=False, help='Load weights')
@@ -34,10 +34,10 @@ parser.add_argument("--resample", action='store_true', default=False, help='Deci
 parser.add_argument("--new_resolution", type=float, default=(0.9375, 0.9375, 3.0), help='New resolution')
 parser.add_argument("--input_channels", type=float, nargs=1, default=1, help="Input channels")
 parser.add_argument("--output_channels", type=float, nargs=1, default=1, help="Output channels")
-parser.add_argument("--patch_size", type=int, nargs=3, default=[128, 128, 128], help="Input dimension for the network")
+parser.add_argument("--patch_size", type=int, nargs=3, default=[64, 64, 64], help="Input dimension for the network")
 parser.add_argument("--batch_size", type=int, nargs=1, default=1, help="Batch size to feed the network (currently supports 1)")
-parser.add_argument("--drop_ratio", type=float, nargs=1, default=0.5, help="Probability to drop a cropped area if the label is empty. All empty patches will be dropped for 0 and accept all cropped patches if set to 1")
-parser.add_argument("--min_pixel", type=float, nargs=1, default=0.001, help="Percentage of minimum non-zero pixels in the cropped label")
+parser.add_argument("--drop_ratio", type=float, nargs=1, default=0, help="Probability to drop a cropped area if the label is empty. All empty patches will be dropped for 0 and accept all cropped patches if set to 1")
+parser.add_argument("--min_pixel", type=float, nargs=1, default=0.1, help="Percentage of minimum non-zero pixels in the cropped label")
 parser.add_argument("--labels", type=int, default=[1], help="Values of the labels")
 parser.add_argument("--n_labels", type=int, default=1, help="The label numbers on the input image")
 parser.add_argument("--initial_learning_rate", type=float, nargs=1, default=0.0002, help="learning rate")
@@ -45,7 +45,7 @@ parser.add_argument("--nb_epoch", type=int, nargs=1, default=200, help="number o
 parser.add_argument("--patience", type=int, nargs=1, default=10, help="learning rate will be reduced after this many epochs if the validation loss is not improving")
 parser.add_argument("--early_stop", type=int, nargs=1, default=41, help="training will be stopped after this many epochs without the validation loss improving")
 parser.add_argument("--learning_rate_drop", type=float, nargs=1, default=0.5, help="factor by which the learning rate will be reduced")
-parser.add_argument("--n_images_per_epoch", type=int, nargs=1, default=100, help="Number of training images per epoch")
+parser.add_argument("--n_images_per_epoch", type=int, nargs=1, default=10, help="Number of training images per epoch")
 # Inference parameters
 parser.add_argument("--stride_inplane", type=int, nargs=1, default=64, help="Stride size in 2D plane")
 parser.add_argument("--stride_layer", type=int, nargs=1, default=64, help="Stride size in z direction")
@@ -160,14 +160,17 @@ if args.Do_you_wanna_check_accuracy is True:
     model = unet_model_3d(input_shape=size_input, n_labels=args.n_labels)
     model.load_weights(args.unet_weights)
 
+    print("Checking accuracy on validation set")
     check_accuracy_model(model, images_list=args.save_dir + '/' + 'val.txt', labels_list=args.save_dir + '/' + 'val_labels.txt', resample=args.resample,
                          new_resolution=args.new_resolution, patch_size_x=args.patch_size[0],patch_size_y=args.patch_size[1], patch_size_z=args.patch_size[2],
                          stride_inplane=args.stride_inplane, stride_layer=args.stride_layer, batch_size=1)
 
+    print("Checking accuracy on test set")
     check_accuracy_model(model, images_list=args.save_dir + '/' + 'test.txt', labels_list=args.save_dir + '/' + 'test_labels.txt', resample=args.resample,
                           new_resolution=args.new_resolution, patch_size_x=args.patch_size[0], patch_size_y=args.patch_size[1], patch_size_z=args.patch_size[2],
                           stride_inplane=args.stride_inplane, stride_layer=args.stride_layer, batch_size=1)
 
+    print("Checking accuracy on training set")
     check_accuracy_model(model, images_list=args.save_dir + '/' + 'train.txt', labels_list=args.save_dir + '/' + 'train_labels.txt',  resample=args.resample,
                          new_resolution=args.new_resolution, patch_size_x=args.patch_size[0], patch_size_y=args.patch_size[1], patch_size_z=args.patch_size[2],
                          stride_inplane=args.stride_inplane, stride_layer=args.stride_layer, batch_size=1)
