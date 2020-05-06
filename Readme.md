@@ -2,7 +2,7 @@
 
 3D-Unet pipeline is a computational toolbox (python-Keras) for segmentation using neural networks. 
 
-![3D U-net](images/unet.png)
+![3D U-net](images/X-force-logo.png)
 
 The training and the inference are patch based: the script randomly extract corresponding patches of the images and labels and feed them to the network during training.
 The inference script extract, segment the sigle patches and automatically recontruct them in the original size.
