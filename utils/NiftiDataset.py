@@ -480,7 +480,7 @@ class NiftiDataset(object):
         label_np = sitk.GetArrayFromImage(sample['label'])
 
         if Segmentation is True:
-            label_np = np.around(label_np)
+            label_np = int(np.around(label_np))
 
         # to unify matrix dimension order between SimpleITK([x,y,z]) and numpy([z,y,x])  (actually it´s the contrary)
         image_np = np.transpose(image_np, (2, 1, 0))
