@@ -2,6 +2,13 @@
 
 3D-Unet pipeline is a computational toolbox (python-Keras) for segmentation using neural networks. 
 
+*******************************************************************************
+### Important News -- Repository Maintenance 
+
+This repository will no longer be developed and improved. A new version for medical images segmentation is available at https://github.com/davidiommi/SALMON 
+*******************************************************************************
+
+
 ![3D U-net](images/X-force-logo.png)
 
 The training and the inference are patch based: the script randomly extract corresponding patches of the images and labels and feed them to the network during training.
